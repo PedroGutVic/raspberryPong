@@ -19,33 +19,21 @@ from gpiozero.pins.lgpio import LGPIOFactory
 # 1. CONFIGURACIÓN DE HARDWARE (OLED y GPIO)
 # ==============================================================================
 
-# --- OLED - 4 PANTALLAS ---
+# --- OLED - 1 PANTALLA PRINCIPAL ---
 try:
-    # Pantalla 1 (Arriba Izquierda)
+    # Pantalla 1 (Principal)
     serial_1 = i2c(port=1, address=0x3C)
     device_1 = ssd1306(serial_1)
     
-    # Pantalla 2 (Arriba Derecha)
-    serial_2 = i2c(port=3, address=0x3C)
-    device_2 = ssd1306(serial_2)
-    
-    # Pantalla 3 (Abajo Izquierda) - Rotada 180°
-    serial_3 = i2c(port=13, address=0x3C)
-    device_3 = ssd1306(serial_3, rotate=2)
-    
-    # Pantalla 4 (Abajo Derecha) - Rotada 180°
-    serial_4 = i2c(port=14, address=0x3C)
-    device_4 = ssd1306(serial_4, rotate=2)
-    
-    devices = [device_1, device_2, device_3, device_4]
+    devices = [device_1]
 except Exception as e:
-    print(f"Error al iniciar las pantallas OLED: {e}")
+    print(f"Error al iniciar la pantalla OLED: {e}")
     sys.exit(1)
     
 WHITE = "white"
 BLACK = "black"
-# Pantalla virtual combinada: 2x2 = 256x128
-WIDTH, HEIGHT = 256, 128
+# Pantalla virtual: 1x1 = 128x64
+WIDTH, HEIGHT = 128, 64
 SCREEN_W, SCREEN_H = 128, 64  # Tamaño de cada pantalla física
 
 # --- Fuentes ---
@@ -83,15 +71,15 @@ except Exception as e:
     btn_down = Button(24)
     btn_select = Button(25)
 
-FPS = 20
+FPS = 60
 last_time = time.time()
 
 # Velocidad inicial de las bolas (ajusta aquí el rango inicial)
-BALL_SPEED_MIN = 12.0
-BALL_SPEED_MAX = 18.0
+BALL_SPEED_MIN = 4.0
+BALL_SPEED_MAX = 6.0
 
 # Aceleración por gravedad aplicada por el modificador (unidades por frame)
-GRAVITY_ACCEL = 0.8
+GRAVITY_ACCEL = 0.9
 # Velocidad mínima de rebote bajo gravedad (no dejar la bola en reposo absoluto)
 MIN_BOUNCE_V = 4.0
 
@@ -143,8 +131,8 @@ paddle_w, paddle_h = 2, 13
 player = SimpleRect(2, HEIGHT//2 - paddle_h//2, paddle_w, paddle_h) 
 ai = SimpleRect(WIDTH - 4, HEIGHT//2 - paddle_h//2, paddle_w, paddle_h) 
 
-paddle_base_speed = 5.0 
-ai_base_speed = 4.0
+paddle_base_speed = 3.0 
+ai_base_speed = 3.0
 paddle_speed = paddle_base_speed
 ai_speed = ai_base_speed
 
@@ -161,8 +149,8 @@ menu_options = ['Jugar', 'Salir']
 last_score = None
 last_menu_press_time = time.time() 
 
-ai_error_chance = 0.6
-ai_reaction_delay = 10
+ai_error_chance = 0.1
+ai_reaction_delay = 8
 ai_timer = 0
 ai_target_y = ai.centery
 
@@ -384,18 +372,9 @@ def draw_on_oled(draw_function):
     # Dibujar todo el juego
     draw_function(virtual_draw)
     
-    # Dividir y enviar a cada pantalla
+    # Enviar a la pantalla principal
     with canvas(device_1) as draw:
-        draw.bitmap((0, 0), virtual_img.crop((0, 0, SCREEN_W, SCREEN_H)), fill=WHITE)
-    
-    with canvas(device_2) as draw:
-        draw.bitmap((0, 0), virtual_img.crop((SCREEN_W, 0, WIDTH, SCREEN_H)), fill=WHITE)
-    
-    with canvas(device_3) as draw:
-        draw.bitmap((0, 0), virtual_img.crop((0, SCREEN_H, SCREEN_W, HEIGHT)), fill=WHITE)
-    
-    with canvas(device_4) as draw:
-        draw.bitmap((0, 0), virtual_img.crop((SCREEN_W, SCREEN_H, WIDTH, HEIGHT)), fill=WHITE)
+        draw.bitmap((0, 0), virtual_img, fill=WHITE)
 
 def game_draw(draw):
     if state == 'menu':
