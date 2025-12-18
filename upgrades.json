@@ -1,0 +1,9 @@
+{
+  "coins": 19,
+  "permanent_upgrades": {
+    "extra_lives": 0,
+    "faster_paddle": 0,
+    "score_multiplier": 0,
+    "ball_slowdown": 0
+  }
+}
