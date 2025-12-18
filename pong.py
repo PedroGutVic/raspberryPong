@@ -3,6 +3,7 @@ from luma.core.interface.serial import i2c
 from luma.oled.device import ssd1306 
 from luma.core.render import canvas
 from PIL import ImageFont, ImageDraw, Image
+import json
 import time
 import math
 import random
@@ -56,6 +57,29 @@ def cleanup_gpio():
         pass
 
 atexit.register(cleanup_gpio)
+
+# ---------------- HIGH SCORE (Archivo simple) ----------------
+HIGH_SCORE_FILE = os.path.join(os.path.dirname(__file__), "highscore.json")
+
+def load_highscore():
+    try:
+        with open(HIGH_SCORE_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return int(data.get('highscore', 0))
+    except Exception:
+        return 0
+
+def save_highscore(score:int):
+    try:
+        with open(HIGH_SCORE_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'highscore': int(score)}, f)
+    except Exception:
+        pass
+
+# Valor cargado en memoria
+highscore = load_highscore()
+# Flag para indicar que se consiguió un nuevo highscore en la ronda pasada
+new_highscore_flag = False
 
 # Pines BCM 23 (Arriba), 24 (Abajo), 25 (Aceptar/Seleccionar).
 try:
@@ -145,14 +169,18 @@ game_over = False
 
 state = 'menu'
 menu_selected = 0
-menu_options = ['Jugar', 'Salir']
+menu_options = ['Jugar', 'Highscore', 'Salir']
 last_score = None
 last_menu_press_time = time.time() 
 
-ai_error_chance = 0.1
-ai_reaction_delay = 8
+# IA mejorada: inicia más competente pero siempre tiene pequeña probabilidad de error
+ai_error_chance = 0.25  # 25% de errores al inicio
+ai_reaction_delay = 6   # Reacciona cada 6 frames (más rápido que antes)
 ai_timer = 0
 ai_target_y = ai.centery
+
+# Menu específico para la pantalla de highscore (solo 1 opción: volver)
+highscore_menu_selected = 0
 
 modifier_timer = 0
 MODIFIER_INTERVAL = 10 * 1000 
@@ -349,11 +377,12 @@ def reset_round(direction=1):
 def reset_game():
     global lives, score, level, game_over, ai_speed, ai_error_chance, modifier_timer
     global ai_reaction_delay, active_modifiers, modifier_pickups, level_target_points, score_in_level
+    global new_highscore_flag
 
     lives = 3; score = 0; level = 1; game_over = False
     ai_speed = ai_base_speed
-    ai_error_chance = 0.6
-    ai_reaction_delay = 10
+    ai_error_chance = 0.25  # 25% errores inicial
+    ai_reaction_delay = 6   # Frames entre decisiones
     modifier_timer = int(time.time() * 1000)
     
     active_modifiers.clear()
@@ -362,6 +391,8 @@ def reset_game():
     level_target_points = 3  
     score_in_level = 0
     reset_round(direction=1)
+    # Limpiar indicador de nuevo highscore al reiniciar juego
+    new_highscore_flag = False
 
 # ---------------- FUNCIONES DE DIBUJO ----------------
 def draw_on_oled(draw_function):
@@ -378,14 +409,64 @@ def draw_on_oled(draw_function):
 
 def game_draw(draw):
     if state == 'menu':
-        draw.text((30, 10), "PONG ROUGE", font=big_font, fill=WHITE)
+        # Título fijo
+        title = "PONG ROUGE"
+        title_x, title_y = 30, 10
+        draw.text((title_x, title_y), title, font=big_font, fill=WHITE)
+
+        # Calcular área del título para evitar solapamientos usando métricas de fuente
+        try:
+            ascent, descent = big_font.getmetrics()
+            title_height = ascent + descent
+            title_bottom = title_y + title_height
+        except Exception:
+            try:
+                tb = draw.textbbox((title_x, title_y), title, font=big_font)
+                title_bottom = tb[3]
+            except Exception:
+                title_bottom = title_y + 18
+
+        # Mostrar último score si existe, justo debajo del título
         if last_score is not None:
-            draw.text((30, 25), f"Score: {last_score}", font=font, fill=WHITE)
-        
+            draw.text((30, title_bottom + 4), f"Score: {last_score}", font=font, fill=WHITE)
+
+        # Parámetros de menú
+        MENU_START_Y = title_bottom + 14
+        ITEM_SPACING = 12
+
+        # Desplazamiento para dar la sensación de que el menú se mueve
+        scroll_offset = -menu_selected * ITEM_SPACING
+
+        # Asegurar que la primera opción no suba por encima del título
+        first_y = MENU_START_Y + scroll_offset
+        min_first_y = title_bottom + 4
+        if first_y < min_first_y:
+            scroll_offset += (min_first_y - first_y)
+
+        # Dibujar las opciones aplicando el desplazamiento
         for i, opt in enumerate(menu_options):
+            y = MENU_START_Y + i * ITEM_SPACING + scroll_offset
             txt = f"{'>' if i == menu_selected else ' '} {opt}"
-            draw.text((10, 40 + i * 10), txt, font=font, fill=WHITE)
+            draw.text((10, int(y)), txt, font=font, fill=WHITE)
         
+    elif state == 'highscore':
+        # Pantalla de highscore limpia
+        # Título
+        draw.text((22, 6), "HIGHSCORE", font=big_font, fill=WHITE)
+        # Valor central
+        try:
+            txt = f"{highscore}"
+            bbox = draw.textbbox((0,0), txt, font=big_font)
+            w = bbox[2] - bbox[0]
+            draw.text(((WIDTH - w)//2, 30), txt, font=big_font, fill=WHITE)
+        except Exception:
+            draw.text((40, 30), str(highscore), font=big_font, fill=WHITE)
+
+        # Menú simple: Volver
+        for i, opt in enumerate(["Volver"]):
+            txt = f"{'>' if i == highscore_menu_selected else ' '} {opt}"
+            draw.text((10, HEIGHT - 14 + i * 10), txt, font=font, fill=WHITE)
+
     elif state == 'playing': 
         for i in range(0, HEIGHT, 4): draw.line([(WIDTH // 2, i), (WIDTH // 2, i + 2)], fill=WHITE)
         draw.rectangle((player.left, player.top, player.right, player.bottom), outline=WHITE, fill=WHITE)
@@ -413,6 +494,11 @@ def game_draw(draw):
             draw.text((25, 20), "GAME OVER", font=big_font, fill=WHITE)
             final = f"Puntos: {last_score}"
             draw.text((35, 40), final, font=font, fill=WHITE)
+            try:
+                if new_highscore_flag:
+                    draw.text((25, 52), "¡Nuevo Highscore!", font=font, fill=WHITE)
+            except Exception:
+                pass
 
 
 # ==============================================================================
@@ -456,8 +542,19 @@ while True:
                 state = 'playing'
                 reset_game()
                 last_score = None
+            elif choice == 'Highscore':
+                state = 'highscore'
+                highscore_menu_selected = 0
+                last_menu_press_time = current_time
             elif choice == 'Salir':
                 sys.exit()
+    elif state == 'highscore':
+        # el submenú de highscore sólo tiene una opción: Volver
+        highscore_menu_selected = (highscore_menu_selected + menu_direction) % 1
+        if select_pressed:
+            # volver al menú principal
+            state = 'menu'
+            last_menu_press_time = current_time
     
     # --- Lógica de Juego ---
     elif state == 'playing' and not game_over:
@@ -484,17 +581,40 @@ while True:
         player.y = max(0, min(HEIGHT - player.h, player.y))
 
         ai_timer += 1
+        # Seleccionar la bola más cercana a la IA
         main_ball = min(balls, key=lambda b: abs(b.rect.centerx - ai.centerx)) if balls else None
 
         if ai_timer >= ai_reaction_delay:
             ai_timer = 0
             if random.random() < ai_error_chance:
+                # Error: apuntar a una posición aleatoria
                 ai_target_y = random.randint(0, HEIGHT)
             else:
-                ai_target_y = main_ball.rect.centery if main_ball is not None else ai.centery 
+                # IA mejorada: predecir posición futura de la bola
+                if main_ball is not None:
+                    # Si la bola se acerca a la IA, predecir dónde estará
+                    if main_ball.vx > 0:  # Bola viene hacia la IA
+                        # Calcular tiempo aproximado hasta llegar
+                        distance_x = ai.centerx - main_ball.rect.centerx
+                        if main_ball.vx > 0:
+                            time_to_reach = distance_x / abs(main_ball.vx)
+                            # Predecir posición Y futura (limitada)
+                            predicted_y = main_ball.rect.centery + (main_ball.vy * time_to_reach)
+                            predicted_y = max(0, min(HEIGHT, predicted_y))
+                            ai_target_y = predicted_y
+                        else:
+                            ai_target_y = main_ball.rect.centery
+                    else:
+                        # Bola se aleja, volver al centro
+                        ai_target_y = HEIGHT // 2
+                else:
+                    ai_target_y = ai.centery
 
-        if ai.centery < ai_target_y: ai.y += ai_effective_speed
-        elif ai.centery > ai_target_y: ai.y -= ai_effective_speed
+        # Movimiento más suave de la IA
+        if ai.centery < ai_target_y - 1: 
+            ai.y += ai_effective_speed
+        elif ai.centery > ai_target_y + 1: 
+            ai.y -= ai_effective_speed
         ai.y = max(0, min(HEIGHT - ai.h, ai.y))
 
         # 3. Actualización y Lógica de Ronda
@@ -527,6 +647,17 @@ while True:
         # Lógica de Fin de Juego
         if lives <= 0:
             last_score = score
+            # Verificar y actualizar highscore
+            try:
+                if score > highscore:
+                    highscore = score
+                    save_highscore(highscore)
+                    new_highscore_flag = True
+                else:
+                    new_highscore_flag = False
+            except Exception:
+                pass
+
             game_over = True 
             should_reset_round = False
 
@@ -534,8 +665,18 @@ while True:
         elif should_reset_round and not balls: 
             if score_in_level >= level_target_points:
                 level += 1; score_in_level = 0; level_target_points += 2
-                ai_speed += 0.6; ai_error_chance = max(0.02, ai_error_chance * 0.78)
-                lives += 1; ai_reaction_delay = max(2, ai_reaction_delay - 1)
+                
+                # Progresión exponencial de dificultad pero con límites jugables
+                # Velocidad: aumenta exponencialmente pero con tope
+                ai_speed = min(ai_base_speed + (level - 1) * 0.5, ai_base_speed + 8.0)
+                
+                # Error: disminuye exponencialmente pero SIEMPRE mantiene 3-5% de error mínimo
+                ai_error_chance = max(0.03, ai_error_chance * 0.65)
+                
+                # Reacción: mejora pero nunca es instantánea (mínimo 2 frames)
+                ai_reaction_delay = max(2, ai_reaction_delay - 1)
+                
+                lives += 1
             reset_round(reset_direction) 
             
             
